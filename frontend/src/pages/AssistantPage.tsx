@@ -69,6 +69,8 @@ export const AssistantPage: React.FC = () => {
             role: 'assistant',
             content: res.data.answer,
             followUps: res.data.followUps,
+            provider: res.data.provider,
+            generatedBy: res.data.generatedBy,
           },
         ]);
       }
@@ -164,6 +166,22 @@ export const AssistantPage: React.FC = () => {
                               &rarr; {q}
                             </button>
                           ))}
+                        </div>
+                      )}
+
+                      {msg.role === 'assistant' && msg.provider && (
+                        <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-dark-400">
+                          {msg.provider === 'gemini' ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                              <Sparkles className="w-3 h-3 text-emerald-400" />
+                              <span>Google Gemini Live</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-amber-400 font-medium">
+                              <span>Heuristic Fallback</span>
+                            </span>
+                          )}
+                          <span className="text-[9px] text-dark-400">{msg.generatedBy || 'SphereAI'}</span>
                         </div>
                       )}
                     </div>

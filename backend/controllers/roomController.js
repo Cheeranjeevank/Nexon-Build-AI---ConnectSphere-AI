@@ -112,7 +112,7 @@ export const joinRoom = async (req, res) => {
       return res.status(404).json({ message: 'Room not found' });
     }
 
-    return res.json({ success: true, participantCount: room.participantCount });
+    return res.json({ success: true, participantCount: room.participantCount, room });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -128,7 +128,7 @@ export const leaveRoom = async (req, res) => {
       await room.save();
     }
 
-    return res.json({ success: true, participantCount: room?.participantCount || 0 });
+    return res.json({ success: true, participantCount: room?.participantCount || 0, room });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

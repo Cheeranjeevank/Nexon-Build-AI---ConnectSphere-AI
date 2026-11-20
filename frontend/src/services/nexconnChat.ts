@@ -162,11 +162,26 @@ class NexconnChatService {
     this.currentUserId = userId;
     this.currentToken = token;
 
+    if (!token) {
+      this.isConnected = false;
+      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'No Token Provided'));
+      return { success: false, error: 'No Nexconn authentication token provided' };
+    }
+
     if (appKey && !this.isInitialized) {
       this.initialize(appKey);
     } else if (!this.isInitialized) {
       this.initialize();
     }
+
+    if (!this.isInitialized) {
+      this.isConnected = false;
+      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'SDK Not Initialized'));
+      return { success: false, error: 'Nexconn NCEngine failed to initialize' };
+    }
+
+    // Set connecting state
+    this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTING, 'Connecting...'));
 
     // Attempt live Nexconn SDK connection
     try {
@@ -175,21 +190,25 @@ class NexconnChatService {
 
       if (res && (res.code === 0 || (res as any).isOk)) {
         this.isConnected = true;
-        console.log(`✅ [Nexconn SDK] Connected successfully. User ID: ${res.data?.userId || userId}`);
+        const connectedId = res.data?.userId || userId;
+        console.log(`✅ [Nexconn SDK] Connected successfully. User ID: ${connectedId}`);
         this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTED, 'Connected'));
         return { success: true };
       }
 
-      console.warn(`[Nexconn SDK] Connect returned code: ${res?.code}. Switching to resilient local bridge.`);
-      this.isConnected = true;
-      this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTED, 'Connected (Dev Mode)'));
-      return { success: true };
+      // Explicit failure: DO NOT mark connected or simulate success
+      this.isConnected = false;
+      const errorMsg = res?.msg || `Connection failed with code: ${res?.code}`;
+      console.error(`❌ [Nexconn SDK] Connection failed: ${errorMsg}`);
+      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, `Disconnected (${res?.code || 'Error'})`));
+      return { success: false, error: errorMsg };
     } catch (error: any) {
-      console.warn('[Nexconn SDK] Connection failed or in offline demo mode:', error.message);
-      // Fallback gracefully so hackathon judge or developer can test messaging immediately
-      this.isConnected = true;
-      this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTED, 'Connected (Demo Engine)'));
-      return { success: true };
+      // Explicit failure: DO NOT mark connected or simulate success
+      this.isConnected = false;
+      const errorMsg = error?.message || 'Connection failed';
+      console.error('❌ [Nexconn SDK] Connection error:', errorMsg);
+      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'Connection Failed'));
+      return { success: false, error: errorMsg };
     }
   }
 
@@ -256,6 +275,13 @@ class NexconnChatService {
       status: 'sending',
     };
 
+    if (!this.isConnected) {
+      console.error('[Nexconn SDK] Cannot send direct message: SDK not connected');
+      newMsg.status = 'failed';
+      this.dispatchIncomingMessage(newMsg);
+      return newMsg;
+    }
+
     try {
       const channel = new DirectChannel(targetUserId);
       const params = new SendTextMessageParams({
@@ -271,11 +297,12 @@ class NexconnChatService {
       if (result && (result.code === 0 || (result as any).isOk)) {
         newMsg.status = 'sent';
       } else {
-        newMsg.status = 'sent'; // Dev mode fallback
+        console.error('[Nexconn SDK] Direct message send returned error:', result);
+        newMsg.status = 'failed';
       }
     } catch (err) {
-      console.warn('[Nexconn SDK] Direct message send error, stored locally:', err);
-      newMsg.status = 'sent';
+      console.error('[Nexconn SDK] Direct message send error:', err);
+      newMsg.status = 'failed';
     }
 
     this.dispatchIncomingMessage(newMsg);
@@ -299,6 +326,13 @@ class NexconnChatService {
       status: 'sending',
     };
 
+    if (!this.isConnected) {
+      console.error('[Nexconn SDK] Cannot send group message: SDK not connected');
+      newMsg.status = 'failed';
+      this.dispatchIncomingMessage(newMsg);
+      return newMsg;
+    }
+
     try {
       const channel = new GroupChannel(groupId);
       const params = new SendTextMessageParams({
@@ -314,11 +348,12 @@ class NexconnChatService {
       if (result && (result.code === 0 || (result as any).isOk)) {
         newMsg.status = 'sent';
       } else {
-        newMsg.status = 'sent';
+        console.error('[Nexconn SDK] Group message send returned error:', result);
+        newMsg.status = 'failed';
       }
     } catch (err) {
-      console.warn('[Nexconn SDK] Group message send error, stored locally:', err);
-      newMsg.status = 'sent';
+      console.error('[Nexconn SDK] Group message send error:', err);
+      newMsg.status = 'failed';
     }
 
     this.dispatchIncomingMessage(newMsg);
@@ -342,6 +377,13 @@ class NexconnChatService {
       }
     }
 
+    if (!this.isConnected) {
+      console.warn('[Nexconn SDK] Cannot join open channel: SDK not connected');
+      this.activeRoomId = null;
+      this.activeRoomChannel = null;
+      return false;
+    }
+
     try {
       const channel = new OpenChannel(openChannelId);
       const result = await channel.enterChannel({
@@ -349,15 +391,18 @@ class NexconnChatService {
         extra: 'source=connectsphere_web',
       });
 
-      this.activeRoomId = openChannelId;
-      this.activeRoomChannel = channel;
-      console.log(`✅ [Nexconn SDK] Entered Open Channel: ${openChannelId}`, result);
-      return true;
+      if (result && (result.code === 0 || (result as any).isOk)) {
+        this.activeRoomId = openChannelId;
+        this.activeRoomChannel = channel;
+        console.log(`✅ [Nexconn SDK] Entered Open Channel: ${openChannelId}`);
+        return true;
+      }
+
+      console.error('[Nexconn SDK] Enter open channel returned error:', result);
+      return false;
     } catch (err) {
-      console.warn('[Nexconn SDK] Enter open channel fallback:', err);
-      this.activeRoomId = openChannelId;
-      this.activeRoomChannel = new OpenChannel(openChannelId);
-      return true;
+      console.error('[Nexconn SDK] Enter open channel exception:', err);
+      return false;
     }
   }
 
@@ -393,6 +438,13 @@ class NexconnChatService {
       status: 'sending',
     };
 
+    if (!this.isConnected) {
+      console.error('[Nexconn SDK] Cannot send room message: SDK not connected');
+      newMsg.status = 'failed';
+      this.dispatchIncomingMessage(newMsg);
+      return newMsg;
+    }
+
     try {
       const channel = this.activeRoomChannel || new OpenChannel(openChannelId);
       const params = new SendTextMessageParams({
@@ -408,11 +460,12 @@ class NexconnChatService {
       if (result && (result.code === 0 || (result as any).isOk)) {
         newMsg.status = 'sent';
       } else {
-        newMsg.status = 'sent';
+        console.error('[Nexconn SDK] Room message send returned error:', result);
+        newMsg.status = 'failed';
       }
     } catch (err) {
-      console.warn('[Nexconn SDK] Room message send error, stored locally:', err);
-      newMsg.status = 'sent';
+      console.error('[Nexconn SDK] Room message send error:', err);
+      newMsg.status = 'failed';
     }
 
     this.dispatchIncomingMessage(newMsg);
@@ -443,6 +496,13 @@ class NexconnChatService {
       status: 'sending',
     };
 
+    if (!this.isConnected) {
+      console.error('[Nexconn SDK] Cannot send media: SDK not connected');
+      newMsg.status = 'failed';
+      this.dispatchIncomingMessage(newMsg);
+      return newMsg;
+    }
+
     try {
       const { isOk, data: params } = await Helper.createSendFileMessageParams(file);
       if (isOk && params) {
@@ -455,14 +515,18 @@ class NexconnChatService {
         else if (channelType === 'group') channel = new GroupChannel(targetId);
         else channel = new OpenChannel(targetId);
 
-        await channel.sendMediaMessage(params);
-        newMsg.status = 'sent';
+        const result = await channel.sendMediaMessage(params);
+        if (result && (result.code === 0 || (result as any).isOk)) {
+          newMsg.status = 'sent';
+        } else {
+          newMsg.status = 'failed';
+        }
       } else {
-        newMsg.status = 'sent';
+        newMsg.status = 'failed';
       }
     } catch (err) {
-      console.warn('Send media error, using local fallback representation:', err);
-      newMsg.status = 'sent';
+      console.error('Send media error:', err);
+      newMsg.status = 'failed';
     }
 
     this.dispatchIncomingMessage(newMsg);
@@ -476,91 +540,62 @@ class NexconnChatService {
     const key = `${channelType}:${targetId}`;
     const cached = this.localMessages.get(key) || [];
 
-    // Attempt SDK remote query
-    try {
-      let rawList: any[] = [];
-      if (channelType === 'open') {
-        const query = OpenChannel.createOpenChannelMessagesQuery({
-          channelId: targetId,
-          pageSize: 30,
-        });
-        const pageResult = await query.loadNextPage();
-        if (pageResult && (pageResult.isOk || pageResult.code === 0)) {
-          const d = pageResult.data as any;
-          rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+    // Attempt SDK remote query if connected
+    if (this.isConnected) {
+      try {
+        let rawList: any[] = [];
+        if (channelType === 'open') {
+          const query = OpenChannel.createOpenChannelMessagesQuery({
+            channelId: targetId,
+            pageSize: 30,
+          });
+          const pageResult = await query.loadNextPage();
+          if (pageResult && (pageResult.isOk || pageResult.code === 0)) {
+            const d = pageResult.data as any;
+            rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+          }
+        } else {
+          const channelIdentifier =
+            channelType === 'direct'
+              ? new DirectChannelIdentifier(targetId)
+              : new GroupChannelIdentifier(targetId);
+
+          const query = BaseChannel.createMessagesQuery({
+            channelIdentifier,
+            pageSize: 30,
+          });
+
+          const pageResult = await query.loadNextPage();
+          if (pageResult && (pageResult.isOk || pageResult.code === 0)) {
+            const d = pageResult.data as any;
+            rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+          }
         }
-      } else {
-        const channelIdentifier =
-          channelType === 'direct'
-            ? new DirectChannelIdentifier(targetId)
-            : new GroupChannelIdentifier(targetId);
 
-        const query = BaseChannel.createMessagesQuery({
-          channelIdentifier,
-          pageSize: 30,
-        });
+        if (rawList.length > 0) {
+          const remoteMsgs: ChatMessage[] = rawList.map((d: any) => ({
+            messageId: d.messageId || String(Math.random()),
+            senderUserId: d.senderUserId || 'unknown',
+            senderName: d.content?.senderUserInfo?.name || d.content?.user?.name || d.senderUserId,
+            senderAvatar: d.content?.senderUserInfo?.avatarUrl || d.content?.user?.portraitUri || d.content?.user?.avatarUrl,
+            targetId: d.targetId || targetId,
+            channelType,
+            content: d.content?.text || d.content?.content || (typeof d.content === 'string' ? d.content : ''),
+            sentTime: d.sentTime || Date.now(),
+            isSelf: d.senderUserId === this.currentUserId,
+            status: 'sent',
+            mediaUrl: d.content?.imageUri || d.content?.remoteUrl || d.content?.fileUrl,
+          }));
 
-        const pageResult = await query.loadNextPage();
-        if (pageResult && (pageResult.isOk || pageResult.code === 0)) {
-          const d = pageResult.data as any;
-          rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+          this.localMessages.set(key, remoteMsgs);
+          return remoteMsgs;
         }
+      } catch (err) {
+        console.warn('[Nexconn SDK] History query error:', err);
       }
-
-      if (rawList.length > 0) {
-        const remoteMsgs: ChatMessage[] = rawList.map((d: any) => ({
-          messageId: d.messageId || String(Math.random()),
-          senderUserId: d.senderUserId || 'unknown',
-          senderName: d.content?.senderUserInfo?.name || d.content?.user?.name || d.senderUserId,
-          senderAvatar: d.content?.senderUserInfo?.avatarUrl || d.content?.user?.portraitUri || d.content?.user?.avatarUrl,
-          targetId: d.targetId || targetId,
-          channelType,
-          content: d.content?.text || d.content?.content || (typeof d.content === 'string' ? d.content : ''),
-          sentTime: d.sentTime || Date.now(),
-          isSelf: d.senderUserId === this.currentUserId,
-          status: 'sent',
-          mediaUrl: d.content?.imageUri || d.content?.remoteUrl || d.content?.fileUrl,
-        }));
-
-        this.localMessages.set(key, remoteMsgs);
-        return remoteMsgs;
-      }
-    } catch (err) {
-      console.warn('[Nexconn SDK] History query error (falling back to cached/demo):', err);
     }
 
-    // If empty, generate contextual welcome messages so the chat is never empty
-    if (cached.length === 0) {
-      const demoMessages: ChatMessage[] = [
-        {
-          messageId: `init_${targetId}_1`,
-          senderUserId: 'system_bot',
-          senderName: 'ConnectSphere Bot',
-          senderAvatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=80',
-          targetId,
-          channelType,
-          content: `Welcome to the ${channelType} channel! This chat is powered by the Nexconn Chat SDK Web.`,
-          sentTime: Date.now() - 3600000,
-          isSelf: false,
-          status: 'sent',
-        },
-        {
-          messageId: `init_${targetId}_2`,
-          senderUserId: 'sarah_ai',
-          senderName: 'Sarah Chen',
-          senderAvatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=100&auto=format&fit=crop&q=80',
-          targetId,
-          channelType,
-          content: `Hey everyone! Feel free to ask questions, share project updates, or use our SphereAI assistant to summarize this thread.`,
-          sentTime: Date.now() - 1800000,
-          isSelf: false,
-          status: 'sent',
-        },
-      ];
-      this.localMessages.set(key, demoMessages);
-      return demoMessages;
-    }
-
+    // Return genuine cached messages from this session, or empty array if none
     return cached;
   }
 }

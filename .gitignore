@@ -14,7 +14,9 @@ build/
 .env.test.local
 .env.production.local
 
-# Logs
+backend/dom-agent-screenshots/
+*.png
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

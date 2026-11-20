@@ -3,7 +3,14 @@ import { User } from '../models/User.js';
 import { nexconnService } from '../services/nexconnService.js';
 
 const generateJWT = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'connectsphere-dev-secret-key-2026', {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: JWT_SECRET environment variable is missing in production!');
+    }
+    return jwt.sign({ id }, 'connectsphere-dev-secret-key-2026', { expiresIn: '30d' });
+  }
+  return jwt.sign({ id }, secret, {
     expiresIn: '30d',
   });
 };
@@ -41,7 +48,9 @@ export const register = async (req, res) => {
     // Obtain Nexconn token for this user
     try {
       const nexconnRes = await nexconnService.issueAccessToken(user._id, user.name, user.avatarUrl);
-      user.nexconnToken = nexconnRes.accessToken;
+      if (nexconnRes.accessToken) {
+        user.nexconnToken = nexconnRes.accessToken;
+      }
     } catch (err) {
       console.warn('Could not auto-fetch Nexconn token at register:', err.message);
     }
@@ -99,8 +108,10 @@ export const login = async (req, res) => {
     if (!user.nexconnToken) {
       try {
         const nexconnRes = await nexconnService.issueAccessToken(user._id, user.name, user.avatarUrl);
-        user.nexconnToken = nexconnRes.accessToken;
-        await user.save();
+        if (nexconnRes.accessToken) {
+          user.nexconnToken = nexconnRes.accessToken;
+          await user.save();
+        }
       } catch (err) {
         console.warn('Could not refresh Nexconn token on login:', err.message);
       }
@@ -188,6 +199,14 @@ export const getNexconnToken = async (req, res) => {
     }
 
     const nexconnRes = await nexconnService.issueAccessToken(user._id, user.name, user.avatarUrl);
+    if (!nexconnRes.accessToken) {
+      return res.status(502).json({
+        success: false,
+        message: nexconnRes.error || 'Unable to obtain live Nexconn token from server API',
+        userId: String(user._id),
+      });
+    }
+
     user.nexconnToken = nexconnRes.accessToken;
     await user.save();
 
@@ -195,11 +214,11 @@ export const getNexconnToken = async (req, res) => {
       success: true,
       userId: String(user._id),
       token: nexconnRes.accessToken,
-      isMock: nexconnRes.isMock || false,
-      appKey: process.env.NEXCONN_APP_KEY || 'YOUR_NEXCONN_APP_KEY',
+      isMock: false,
+      appKey: process.env.NEXCONN_APP_KEY || '',
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 

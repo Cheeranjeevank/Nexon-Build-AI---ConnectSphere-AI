@@ -57,6 +57,10 @@ class GeminiService {
         keyTakeaways: [],
         sentiment: 'neutral',
         actionItems: [],
+        activeTopics: [],
+        provider: 'none',
+        model: 'none',
+        generatedBy: 'SphereAI (No Messages)',
       };
     }
 
@@ -83,7 +87,15 @@ ${conversationText}`;
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        return extractJSON(text);
+        const parsed = extractJSON(text);
+        if (parsed) {
+          return {
+            ...parsed,
+            provider: 'gemini',
+            model: this.modelName,
+            generatedBy: `SphereAI (Google Gemini ${this.modelName})`,
+          };
+        }
       } catch (err) {
         console.warn('Gemini API summarize error, falling back to local synthesizer:', err.message);
       }
@@ -110,7 +122,9 @@ ${conversationText}`;
         'Schedule follow-up live discussion room for in-depth Q&A.',
       ],
       activeTopics: sampleTopics.length > 0 ? sampleTopics : ['Real-time sync', 'Community growth', 'Architecture'],
-      generatedBy: 'SphereAI Heuristic Engine (Configure GEMINI_API_KEY for live LLM)',
+      provider: 'heuristic',
+      model: 'heuristic-engine',
+      generatedBy: 'SphereAI Heuristic Engine (Local Fallback)',
     };
   }
 
@@ -137,7 +151,15 @@ Format output as JSON:
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        return extractJSON(text);
+        const parsed = extractJSON(text);
+        if (parsed) {
+          return {
+            ...parsed,
+            provider: 'gemini',
+            model: this.modelName,
+            generatedBy: `SphereAI (Google Gemini ${this.modelName})`,
+          };
+        }
       } catch (err) {
         console.warn('Gemini API answerQuestion error, falling back:', err.message);
       }
@@ -152,7 +174,9 @@ Format output as JSON:
         'Are there existing resources or tutorials shared by other members?',
       ],
       tags: ['Community Advice', 'Best Practices', 'ConnectSphere'],
-      generatedBy: 'SphereAI Knowledge Engine',
+      provider: 'heuristic',
+      model: 'heuristic-engine',
+      generatedBy: 'SphereAI Knowledge Engine (Local Fallback)',
     };
   }
 
@@ -179,7 +203,15 @@ Format as JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        return extractJSON(text);
+        const parsed = extractJSON(text);
+        if (parsed) {
+          return {
+            ...parsed,
+            provider: 'gemini',
+            model: this.modelName,
+            generatedBy: `SphereAI (Google Gemini ${this.modelName})`,
+          };
+        }
       } catch (err) {
         console.warn('Gemini API generateTopics error, falling back:', err.message);
       }
@@ -246,7 +278,12 @@ Format as JSON:
       },
     ];
 
-    return { topics, generatedBy: 'SphereAI Topic Generator' };
+    return {
+      topics,
+      provider: 'heuristic',
+      model: 'heuristic-engine',
+      generatedBy: 'SphereAI Topic Generator (Local Fallback)',
+    };
   }
 
   /**
@@ -284,7 +321,15 @@ Output strictly JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        return extractJSON(text);
+        const parsed = extractJSON(text);
+        if (parsed) {
+          return {
+            ...parsed,
+            provider: 'gemini',
+            model: this.modelName,
+            generatedBy: `SphereAI Smart Moderator (Google Gemini ${this.modelName})`,
+          };
+        }
       } catch (err) {
         console.warn('Gemini API moderateMessage error, using local detector:', err.message);
       }
@@ -297,6 +342,9 @@ Output strictly JSON:
         flaggedCategories: ['harassment', 'toxic'],
         recommendation: 'flag_for_review',
         reason: `Detected potentially offensive language: ${foundAbuse.join(', ')}`,
+        provider: 'heuristic',
+        model: 'heuristic-engine',
+        generatedBy: 'SphereAI Rule-based Filter (Local Fallback)',
       };
     }
 
@@ -307,6 +355,9 @@ Output strictly JSON:
         flaggedCategories: ['spam'],
         recommendation: 'flag_for_review',
         reason: `Detected spam / commercial promotion patterns: ${foundSpam.join(', ')}`,
+        provider: 'heuristic',
+        model: 'heuristic-engine',
+        generatedBy: 'SphereAI Rule-based Filter (Local Fallback)',
       };
     }
 
@@ -316,6 +367,9 @@ Output strictly JSON:
       flaggedCategories: [],
       recommendation: 'allow',
       reason: 'Message content passes safety guidelines.',
+      provider: 'heuristic',
+      model: 'heuristic-engine',
+      generatedBy: 'SphereAI Safety Guidelines (Local Evaluator)',
     };
   }
 
@@ -356,7 +410,15 @@ Format strictly JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        return extractJSON(text);
+        const parsed = extractJSON(text);
+        if (parsed) {
+          return {
+            ...parsed,
+            provider: 'gemini',
+            model: this.modelName,
+            generatedBy: `SphereAI (Google Gemini ${this.modelName})`,
+          };
+        }
       } catch (err) {
         console.warn('Gemini recommendCommunities error, falling back:', err.message);
       }
@@ -370,7 +432,12 @@ Format strictly JSON:
       reason: `Matches your passion for ${c.category} with active discussions and vibrant peers.`,
     }));
 
-    return { recommendations };
+    return {
+      recommendations,
+      provider: 'heuristic',
+      model: 'heuristic-engine',
+      generatedBy: 'SphereAI Matchmaker (Local Fallback)',
+    };
   }
 }
 

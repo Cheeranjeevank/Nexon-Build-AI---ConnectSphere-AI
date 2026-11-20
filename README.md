@@ -385,11 +385,11 @@ npm run dev
    * `PORT` = `10000`
    * `MONGODB_URI` = `<Your MongoDB Atlas connection string>`
    * `JWT_SECRET` = `<Generate a secure random string>`
-   * `NEXCONN_APP_KEY` = `x4vkb1qpx5cqk`
-   * `NEXCONN_APP_SECRET` = `zETLbOIStuP`
+   * `NEXCONN_APP_KEY` = `<Your Nexconn App Key>`
+   * `NEXCONN_APP_SECRET` = `<Your Nexconn App Secret>`
    * `NEXCONN_API_BASE_URL` = `https://api.sg-light-api.com`
    * `GEMINI_API_KEY` = `<Your Google Gemini API Key>`
-   * `GEMINI_MODEL` = `gemini-flash-latest`
+   * `GEMINI_MODEL` = `gemini-3.5-flash-lite`
 5. Click **Create Web Service**. Once deployed, copy your backend URL (e.g. `https://connectsphere-backend.onrender.com`).
 
 #### Option B: Railway
@@ -408,7 +408,7 @@ npm run dev
    * **Framework Preset:** Vite
    * **Root Directory:** Click **Edit** and select `frontend`
 4. Under **Environment Variables**, add:
-   * `VITE_NEXCONN_APP_KEY` = `x4vkb1qpx5cqk`
+   * `VITE_NEXCONN_APP_KEY` = `<Your Nexconn App Key>`
    * `VITE_API_URL` = `https://<your-render-backend-url>/api` *(Point to your deployed backend)*
 5. Click **Deploy**. Vercel will build the project and provide your live application URL!
 

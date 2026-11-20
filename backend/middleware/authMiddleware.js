@@ -7,7 +7,11 @@ export const protect = async (req, res, next) => {
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
       token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'connectsphere-dev-secret-key-2026');
+      const secret = process.env.JWT_SECRET;
+      if (!secret && process.env.NODE_ENV === 'production') {
+        throw new Error('FATAL: JWT_SECRET environment variable is missing in production!');
+      }
+      const decoded = jwt.verify(token, secret || 'connectsphere-dev-secret-key-2026');
       req.user = await User.findById(decoded.id).select('-password');
 
       if (!req.user) {

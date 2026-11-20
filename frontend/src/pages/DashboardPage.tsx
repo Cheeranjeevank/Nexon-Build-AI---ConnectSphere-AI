@@ -110,9 +110,27 @@ export const DashboardPage: React.FC = () => {
               </p>
               <div className="flex items-center gap-2 mt-2">
                 <span className="inline-flex items-center gap-1.5 text-xs text-dark-400">
-                  <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                  <Wifi
+                    className={`w-3.5 h-3.5 ${
+                      nexconnStatus.toLowerCase() === 'connected'
+                        ? 'text-emerald-400 animate-pulse'
+                        : nexconnStatus.toLowerCase().includes('connecting')
+                        ? 'text-amber-400 animate-ping'
+                        : 'text-slate-400'
+                    }`}
+                  />
                   <span>Nexconn Chat Status: </span>
-                  <strong className="text-emerald-400">{nexconnStatus}</strong>
+                  <strong
+                    className={
+                      nexconnStatus.toLowerCase() === 'connected'
+                        ? 'text-emerald-400'
+                        : nexconnStatus.toLowerCase().includes('connecting')
+                        ? 'text-amber-400'
+                        : 'text-slate-400'
+                    }
+                  >
+                    {nexconnStatus}
+                  </strong>
                 </span>
               </div>
             </div>
@@ -335,7 +353,17 @@ export const DashboardPage: React.FC = () => {
             <div className="space-y-1.5 text-[11px] text-dark-400 mb-4">
               <div className="flex justify-between">
                 <span>SDK Status:</span>
-                <span className="text-emerald-400 font-semibold">{nexconnStatus}</span>
+                <span
+                  className={`font-semibold ${
+                    nexconnStatus.toLowerCase() === 'connected'
+                      ? 'text-emerald-400'
+                      : nexconnStatus.toLowerCase().includes('connecting')
+                      ? 'text-amber-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {nexconnStatus}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Data Center:</span>

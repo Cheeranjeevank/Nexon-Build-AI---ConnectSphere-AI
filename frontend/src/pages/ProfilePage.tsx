@@ -205,7 +205,17 @@ export const ProfilePage: React.FC = () => {
             <div className="space-y-2.5 text-xs text-dark-300">
               <div className="p-2.5 rounded-xl bg-dark-900 border border-white/5 flex items-center justify-between">
                 <span>SDK Status:</span>
-                <span className="font-semibold text-emerald-400">{nexconnStatus}</span>
+                <span
+                  className={`font-semibold ${
+                    nexconnStatus.toLowerCase() === 'connected'
+                      ? 'text-emerald-400'
+                      : nexconnStatus.toLowerCase().includes('connecting')
+                      ? 'text-amber-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {nexconnStatus}
+                </span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-dark-900 border border-white/5 space-y-1">

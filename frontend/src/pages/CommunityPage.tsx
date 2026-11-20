@@ -407,63 +407,82 @@ export const CommunityPage: React.FC = () => {
 
             {/* Messages Thread */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.map((msg) => {
-                const isMe = msg.isSelf || msg.senderUserId === user?._id;
-                return (
-                  <div
-                    key={msg.messageId}
-                    className={`flex items-start gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}
-                  >
-                    <img
-                      src={
-                        msg.senderAvatar ||
-                        `https://api.dicebear.com/7.x/identicon/svg?seed=${msg.senderUserId}`
-                      }
-                      alt={msg.senderName}
-                      className="w-8 h-8 rounded-full object-cover ring-1 ring-white/10 flex-shrink-0 mt-0.5"
-                    />
-                    <div className={`max-w-[75%] ${isMe ? 'text-right' : 'text-left'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-bold text-white">
-                          {isMe ? 'You' : msg.senderName || msg.senderUserId}
-                        </span>
-                        <span className="text-[10px] text-dark-400 font-mono">
-                          {new Date(msg.sentTime).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                        {!isMe && (
-                          <button
-                            onClick={() =>
-                              setReportTarget({
-                                messageId: msg.messageId,
-                                channelId: community.nexconnGroupId,
-                                channelType: 'group',
-                                content: msg.content,
-                                reportedUserId: msg.senderUserId,
-                              })
-                            }
-                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-dark-400 hover:text-red-400"
-                            title="Report message"
-                          >
-                            <ShieldAlert className="w-3 h-3" />
-                          </button>
+              {messages.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-dark-400">
+                  <div className="w-10 h-10 rounded-2xl bg-dark-900 border border-white/5 flex items-center justify-center mb-2">
+                    <MessageSquare className="w-5 h-5 text-dark-500" />
+                  </div>
+                  <h4 className="text-xs font-semibold text-white mb-0.5">No messages in #{community.name} yet</h4>
+                  <p className="text-[11px] max-w-xs text-dark-400">
+                    Be the first to start the discussion in this community channel!
+                  </p>
+                </div>
+              ) : (
+                messages.map((msg) => {
+                  const isMe = msg.isSelf || msg.senderUserId === user?._id;
+                  return (
+                    <div
+                      key={msg.messageId}
+                      className={`flex items-start gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}
+                    >
+                      <img
+                        src={
+                          msg.senderAvatar ||
+                          `https://api.dicebear.com/7.x/identicon/svg?seed=${msg.senderUserId}`
+                        }
+                        alt={msg.senderName}
+                        className="w-8 h-8 rounded-full object-cover ring-1 ring-white/10 flex-shrink-0 mt-0.5"
+                      />
+                      <div className={`max-w-[75%] ${isMe ? 'text-right' : 'text-left'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-bold text-white">
+                            {isMe ? 'You' : msg.senderName || msg.senderUserId}
+                          </span>
+                          <span className="text-[10px] text-dark-400 font-mono">
+                            {new Date(msg.sentTime).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                          {!isMe && (
+                            <button
+                              onClick={() =>
+                                setReportTarget({
+                                  messageId: msg.messageId,
+                                  channelId: community.nexconnGroupId,
+                                  channelType: 'group',
+                                  content: msg.content,
+                                  reportedUserId: msg.senderUserId,
+                                })
+                              }
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-dark-400 hover:text-red-400"
+                              title="Report message"
+                            >
+                              <ShieldAlert className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <div
+                          className={`p-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                            isMe
+                              ? msg.status === 'failed'
+                                ? 'bg-rose-950/80 border border-rose-500/30 text-rose-100 rounded-tr-none'
+                                : 'bg-brand-indigo text-white rounded-tr-none shadow-md shadow-brand-indigo/20'
+                              : 'bg-dark-900 border border-white/5 text-dark-200 rounded-tl-none'
+                          }`}
+                        >
+                          {msg.content}
+                        </div>
+                        {isMe && msg.status === 'failed' && (
+                          <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1">
+                            <span>Failed to deliver</span>
+                          </div>
                         )}
                       </div>
-                      <div
-                        className={`p-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
-                          isMe
-                            ? 'bg-brand-indigo text-white rounded-tr-none shadow-md shadow-brand-indigo/20'
-                            : 'bg-dark-900 border border-white/5 text-dark-200 rounded-tl-none'
-                        }`}
-                      >
-                        {msg.content}
-                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -578,38 +597,57 @@ export const CommunityPage: React.FC = () => {
 
               {/* Room messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {roomMessages.map((msg) => {
-                  const isMe = msg.isSelf || msg.senderUserId === user?._id;
-                  return (
-                    <div
-                      key={msg.messageId}
-                      className={`flex items-start gap-3 ${isMe ? 'flex-row-reverse' : ''}`}
-                    >
-                      <img
-                        src={
-                          msg.senderAvatar ||
-                          `https://api.dicebear.com/7.x/identicon/svg?seed=${msg.senderUserId}`
-                        }
-                        alt="avatar"
-                        className="w-7 h-7 rounded-full object-cover ring-1 ring-white/10"
-                      />
-                      <div className={`max-w-[70%] ${isMe ? 'text-right' : 'text-left'}`}>
-                        <span className="text-[11px] font-bold text-white block mb-0.5">
-                          {isMe ? 'You' : msg.senderName || msg.senderUserId}
-                        </span>
-                        <div
-                          className={`p-3 rounded-2xl text-xs sm:text-sm ${
-                            isMe
-                              ? 'bg-amber-600 text-white rounded-tr-none'
-                              : 'bg-dark-900 border border-white/5 text-dark-200 rounded-tl-none'
-                          }`}
-                        >
-                          {msg.content}
+                {roomMessages.length === 0 ? (
+                  <div className="h-48 flex flex-col items-center justify-center text-center p-6 text-dark-400">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-2">
+                      <Radio className="w-5 h-5 text-amber-400" />
+                    </div>
+                    <h4 className="text-xs font-semibold text-white mb-0.5">Live Discussion Active</h4>
+                    <p className="text-[11px] max-w-xs text-dark-400">
+                      You are in {activeRoom.name}. Broadcast the first message to everyone in the room!
+                    </p>
+                  </div>
+                ) : (
+                  roomMessages.map((msg) => {
+                    const isMe = msg.isSelf || msg.senderUserId === user?._id;
+                    return (
+                      <div
+                        key={msg.messageId}
+                        className={`flex items-start gap-3 ${isMe ? 'flex-row-reverse' : ''}`}
+                      >
+                        <img
+                          src={
+                            msg.senderAvatar ||
+                            `https://api.dicebear.com/7.x/identicon/svg?seed=${msg.senderUserId}`
+                          }
+                          alt="avatar"
+                          className="w-7 h-7 rounded-full object-cover ring-1 ring-white/10"
+                        />
+                        <div className={`max-w-[70%] ${isMe ? 'text-right' : 'text-left'}`}>
+                          <span className="text-[11px] font-bold text-white block mb-0.5">
+                            {isMe ? 'You' : msg.senderName || msg.senderUserId}
+                          </span>
+                          <div
+                            className={`p-3 rounded-2xl text-xs sm:text-sm ${
+                              isMe
+                                ? msg.status === 'failed'
+                                  ? 'bg-rose-950/80 border border-rose-500/30 text-rose-100 rounded-tr-none'
+                                  : 'bg-amber-600 text-white rounded-tr-none'
+                                : 'bg-dark-900 border border-white/5 text-dark-200 rounded-tl-none'
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+                          {isMe && msg.status === 'failed' && (
+                            <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1">
+                              <span>Failed to deliver</span>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {/* Room input */}
@@ -749,9 +787,21 @@ export const CommunityPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-[11px] text-dark-400 pt-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-dark-400 pt-2 border-t border-white/5">
                   <span>Tone: <strong className="text-brand-blue uppercase">{aiSummary.sentiment || 'Productive'}</strong></span>
-                  <span>{aiSummary.generatedBy || 'Powered by SphereAI'}</span>
+                  <div className="flex items-center gap-1.5">
+                    {aiSummary.provider === 'gemini' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-emerald-400" />
+                        <span>Google Gemini Live</span>
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        Heuristic Fallback
+                      </span>
+                    )}
+                    <span>{aiSummary.generatedBy || 'Powered by SphereAI'}</span>
+                  </div>
                 </div>
               </div>
             ) : (

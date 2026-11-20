@@ -52,15 +52,16 @@ class NexconnService {
    */
   async issueAccessToken(userId, name, avatarUrl = '') {
     if (!this.isConfigured()) {
-      console.warn(
-        '⚠️ Nexconn credentials not configured. Generating developer test token. Set NEXCONN_APP_KEY and NEXCONN_APP_SECRET in backend/.env for live production connection.'
-      );
-      // Generate a reproducible developer token format matching Nexconn format for offline testing
-      const mockToken = `nx_dev_${userId}_${crypto.randomBytes(16).toString('hex')}@${this.baseUrl.replace('https://', '')}`;
+      const errorMsg = 'Nexconn credentials not configured: NEXCONN_APP_KEY and NEXCONN_APP_SECRET are required.';
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`[Production Error] ${errorMsg}`);
+      }
+      console.warn(`⚠️ [Development] ${errorMsg}`);
       return {
-        isMock: true,
+        isMock: false,
         userId: String(userId),
-        accessToken: mockToken,
+        accessToken: '',
+        error: errorMsg,
       };
     }
 
@@ -86,17 +87,28 @@ class NexconnService {
         };
       }
 
+      const errMsg = response.data?.msg || `Failed to issue Nexconn token (code: ${response.data?.code})`;
       console.error('Nexconn token issuance returned error:', response.data);
-      throw new Error(response.data?.msg || 'Failed to issue Nexconn token');
-    } catch (error) {
-      console.error('Error contacting Nexconn Server API:', error.response?.data || error.message);
-      // Fallback to dev token so client testing can proceed with diagnostic notification
-      const mockToken = `nx_fallback_${userId}_${crypto.randomBytes(16).toString('hex')}`;
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(errMsg);
+      }
       return {
-        isMock: true,
-        error: error.message,
+        isMock: false,
+        error: errMsg,
         userId: String(userId),
-        accessToken: mockToken,
+        accessToken: '',
+      };
+    } catch (error) {
+      const errMsg = error.response?.data?.msg || error.message;
+      console.error('Error contacting Nexconn Server API:', error.response?.data || error.message);
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Nexconn API Error: ${errMsg}`);
+      }
+      return {
+        isMock: false,
+        error: errMsg,
+        userId: String(userId),
+        accessToken: '',
       };
     }
   }
@@ -107,7 +119,11 @@ class NexconnService {
    */
   async createGroupChannel(channelId, name, ownerUserId, inviteeUserIds = [], profile = {}) {
     if (!this.isConfigured()) {
-      return { isMock: true, channelId, code: 0 };
+      const errorMsg = 'Nexconn credentials not configured for createGroupChannel';
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(errorMsg);
+      }
+      return { isMock: false, code: -1, error: errorMsg, channelId };
     }
 
     try {
@@ -140,7 +156,10 @@ class NexconnService {
         return { isMock: false, code: 0, existed: true, channelId };
       }
       console.warn('Nexconn createGroupChannel error:', errData || error.message);
-      return { isMock: true, error: error.message, channelId };
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Nexconn createGroupChannel failed: ${errData?.msg || error.message}`);
+      }
+      return { isMock: false, code: errData?.code || -1, error: errData?.msg || error.message, channelId };
     }
   }
 
@@ -150,7 +169,7 @@ class NexconnService {
    */
   async inviteToGroupChannel(channelId, userIds = []) {
     if (!this.isConfigured() || userIds.length === 0) {
-      return { isMock: true, code: 0 };
+      return { isMock: false, code: userIds.length === 0 ? 0 : -1 };
     }
 
     try {
@@ -168,7 +187,7 @@ class NexconnService {
       return { isMock: false, ...response.data };
     } catch (error) {
       console.warn('Nexconn inviteToGroupChannel error:', error.response?.data || error.message);
-      return { isMock: true, error: error.message };
+      return { isMock: false, code: -1, error: error.message };
     }
   }
 
@@ -178,7 +197,11 @@ class NexconnService {
    */
   async createOpenChannel(channelId, ttlMinutes = 1440) {
     if (!this.isConfigured()) {
-      return { isMock: true, channelId, code: 0 };
+      const errorMsg = 'Nexconn credentials not configured for createOpenChannel';
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(errorMsg);
+      }
+      return { isMock: false, code: -1, error: errorMsg, channelId };
     }
 
     try {
@@ -197,8 +220,12 @@ class NexconnService {
 
       return { isMock: false, ...response.data };
     } catch (error) {
-      console.warn('Nexconn createOpenChannel error:', error.response?.data || error.message);
-      return { isMock: true, error: error.message, channelId };
+      const errData = error.response?.data;
+      console.warn('Nexconn createOpenChannel error:', errData || error.message);
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Nexconn createOpenChannel failed: ${errData?.msg || error.message}`);
+      }
+      return { isMock: false, code: errData?.code || -1, error: errData?.msg || error.message, channelId };
     }
   }
 
