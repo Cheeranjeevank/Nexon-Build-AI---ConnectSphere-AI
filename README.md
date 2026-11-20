@@ -5,6 +5,12 @@
 [![Frontend](https://img.shields.io/badge/Frontend-React%2019%20%7C%20Vite%206%20%7C%20Tailwind%20CSS-06b6d4?style=for-the-badge)](https://vitejs.dev)
 [![Backend](https://img.shields.io/badge/Backend-Node.js%20%7C%20Express%20%7C%20MongoDB-10b981?style=for-the-badge)](https://nodejs.org)
 [![AI Copilot](https://img.shields.io/badge/AI-Google%20Gemini%20API-8b5cf6?style=for-the-badge)](https://ai.google.dev)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel%20Production-000000?style=for-the-badge&logo=vercel)](https://nexon-build-ai-connect-sphere-ai.vercel.app)
+[![API Status](https://img.shields.io/badge/API-Render%20Live-46e3b7?style=for-the-badge&logo=render)](https://connectsphere-backend-2xjq.onrender.com/api/health)
+
+> **🚀 Live Application**: **[https://nexon-build-ai-connect-sphere-ai.vercel.app](https://nexon-build-ai-connect-sphere-ai.vercel.app)**  
+> **⚡ Live Backend API**: **[https://connectsphere-backend-2xjq.onrender.com](https://connectsphere-backend-2xjq.onrender.com)**  
+> **📡 API Health & Diagnostics**: **[https://connectsphere-backend-2xjq.onrender.com/api/health](https://connectsphere-backend-2xjq.onrender.com/api/health)**
 
 > **ConnectSphere** is an intelligent, real-time community communication platform where people discover interest-based communities, communicate in real time, participate in live topic discussion rooms, share ideas, and collaborate seamlessly with AI assistance.
 > 
