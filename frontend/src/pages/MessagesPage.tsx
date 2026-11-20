@@ -20,6 +20,7 @@ import {
   Clock,
   WifiOff,
   RotateCcw,
+  ChevronLeft,
 } from 'lucide-react';
 import { ReportModal } from '../components/ReportModal';
 
@@ -45,9 +46,12 @@ export const MessagesPage: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [isPolishing, setIsPolishing] = useState(false);
   const [reportTarget, setReportTarget] = useState<any | null>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [showMobileList, setShowMobileList] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimerRef = useRef<any>(null);
 
   // Fetch initial conversations list (other users + joined communities)
   useEffect(() => {
@@ -127,10 +131,55 @@ export const MessagesPage: React.FC = () => {
     return unsubscribe;
   }, [activeConversation]);
 
+  // Subscribe to typing status updates from Nexconn SDK
+  useEffect(() => {
+    if (!activeConversation) return;
+    const unsub = nexconnChat.onTyping((channelId, users) => {
+      if (channelId === activeConversation.id) {
+        setTypingUsers(users);
+      }
+    });
+    return unsub;
+  }, [activeConversation]);
+
+  // Subscribe to read receipt confirmations from Nexconn SDK
+  useEffect(() => {
+    const unsub = nexconnChat.onReadReceipt((readIds) => {
+      setMessages((prev) =>
+        prev.map((m) => (readIds.includes(m.messageId) ? { ...m, status: 'read' } : m))
+      );
+    });
+    return unsub;
+  }, []);
+
+  // Send read receipts when conversation is active and has unread incoming messages
+  useEffect(() => {
+    if (!activeConversation || messages.length === 0) return;
+    const unreadIncomingIds = messages
+      .filter((m) => !m.isSelf && m.status !== 'read')
+      .map((m) => m.messageId);
+
+    if (unreadIncomingIds.length > 0) {
+      nexconnChat.markAsRead(activeConversation.type, activeConversation.id, unreadIncomingIds);
+    }
+  }, [activeConversation, messages]);
+
   // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+    if (activeConversation && activeConversation.type === 'direct') {
+      if (!typingTimerRef.current) {
+        nexconnChat.sendTypingStatus('direct', activeConversation.id);
+        typingTimerRef.current = setTimeout(() => {
+          typingTimerRef.current = null;
+        }, 3000);
+      }
+    }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,7 +263,7 @@ export const MessagesPage: React.FC = () => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <div className="glass-panel rounded-3xl border border-white/10 overflow-hidden flex flex-col md:flex-row h-[calc(100vh-8.5rem)] shadow-2xl">
         {/* Left Sidebar: Conversations List */}
-        <div className="w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-white/10 bg-dark-900/60 flex flex-col flex-shrink-0">
+        <div className={`w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-white/10 bg-dark-900/60 flex flex-col flex-shrink-0 ${showMobileList ? 'flex' : 'hidden md:flex'}`}>
           {/* Header & Tabs */}
           <div className="p-4 border-b border-white/10 space-y-3">
             <div className="flex items-center justify-between">
@@ -287,6 +336,7 @@ export const MessagesPage: React.FC = () => {
                     onClick={() => {
                       setActiveConversation(item);
                       setSearchParams({ target: item.id });
+                      setShowMobileList(false);
                     }}
                     className={`w-full p-3.5 flex items-center gap-3 text-left transition-all ${
                       isSelected
@@ -319,10 +369,18 @@ export const MessagesPage: React.FC = () => {
 
         {/* Right Active Chat Pane */}
         {activeConversation ? (
-          <div className="flex-1 flex flex-col h-full bg-dark-950/40">
+          <div className={`flex-1 flex flex-col h-full bg-dark-950/40 ${showMobileList ? 'hidden md:flex' : 'flex'}`}>
             {/* Top Chat Bar */}
             <div className="p-4 border-b border-white/10 bg-dark-900/60 flex items-center justify-between">
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileList(true)}
+                  className="md:hidden p-1.5 -ml-1 text-dark-400 hover:text-white rounded-lg hover:bg-white/5"
+                  title="Back to conversations"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
                 <img
                   src={activeConversation.avatarUrl}
                   alt={activeConversation.name}
@@ -335,7 +393,13 @@ export const MessagesPage: React.FC = () => {
                       {activeConversation.type}
                     </span>
                   </h3>
-                  <span className="text-[11px] text-dark-400">{activeConversation.subtitle}</span>
+                  <span className="text-[11px] text-dark-400">
+                    {typingUsers.length > 0 ? (
+                      <span className="text-brand-purple font-semibold animate-pulse">typing...</span>
+                    ) : (
+                      activeConversation.subtitle
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -448,10 +512,20 @@ export const MessagesPage: React.FC = () => {
                                 <Clock className="w-3 h-3 animate-spin" />
                                 <span>Sending...</span>
                               </span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-dark-400">
-                                <CheckCheck className="w-3 h-3 text-brand-blue" />
+                            ) : msg.status === 'read' ? (
+                              <span className="flex items-center gap-1 text-brand-blue font-medium" title="Read by recipient">
+                                <CheckCheck className="w-3.5 h-3.5 text-brand-blue" />
+                                <span>Read</span>
+                              </span>
+                            ) : msg.status === 'delivered' ? (
+                              <span className="flex items-center gap-1 text-emerald-400" title="Delivered to server">
+                                <CheckCheck className="w-3 h-3 text-emerald-400" />
                                 <span>Delivered</span>
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-dark-400" title="Sent">
+                                <Check className="w-3 h-3 text-dark-400" />
+                                <span>Sent</span>
                               </span>
                             )}
                           </div>
@@ -463,6 +537,18 @@ export const MessagesPage: React.FC = () => {
               )}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Typing Indicator Bar */}
+            {typingUsers.length > 0 && (
+              <div className="flex items-center gap-2 px-6 py-1.5 text-xs text-brand-purple bg-brand-purple/5 border-t border-brand-purple/10 animate-pulse">
+                <div className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-purple animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-purple animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-purple animate-bounce" />
+                </div>
+                <span>{activeConversation.name} is typing...</span>
+              </div>
+            )}
 
             {/* Message Composer */}
             <div className="p-3 sm:p-4 border-t border-white/10 bg-dark-900/60">
@@ -486,7 +572,7 @@ export const MessagesPage: React.FC = () => {
                   <input
                     type="text"
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    onChange={handleInputChange}
                     placeholder={`Message ${activeConversation.name} (Nexconn Chat SDK)...`}
                     className="flex-1 py-2.5 px-3.5 rounded-xl glass-input text-xs sm:text-sm"
                   />

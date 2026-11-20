@@ -118,6 +118,17 @@ export const CommunityPage: React.FC = () => {
     };
   }, [community, activeRoom]);
 
+  // Real-time participant counter updates for Open Channel rooms
+  useEffect(() => {
+    if (!activeRoom) return;
+    const unsub = nexconnChat.onParticipant((channelId, count) => {
+      if (activeRoom.openChannelId === channelId) {
+        setActiveRoom((prev: any) => (prev ? { ...prev, participantCount: count } : null));
+      }
+    });
+    return unsub;
+  }, [activeRoom]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

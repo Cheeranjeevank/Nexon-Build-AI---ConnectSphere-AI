@@ -3,6 +3,8 @@ import {
   ConnectionStatusHandler,
   ConnectionStatus,
   MessageHandler,
+  ChannelHandler,
+  OpenChannelHandler,
   DirectChannel,
   GroupChannel,
   OpenChannel,
@@ -10,6 +12,7 @@ import {
   DirectChannelIdentifier,
   GroupChannelIdentifier,
   SendTextMessageParams,
+  SendImageMessageParams,
   Helper,
   AreaCode,
 } from '@nexconn/chat';
@@ -24,13 +27,16 @@ export interface ChatMessage {
   content: string;
   sentTime: number;
   isSelf?: boolean;
-  status?: 'sending' | 'sent' | 'failed';
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   mediaUrl?: string;
   tempId?: string;
 }
 
 type MessageCallback = (msg: ChatMessage) => void;
 type StatusCallback = (status: ConnectionStatus, statusText: string) => void;
+type TypingCallback = (channelId: string, typingUsers: string[]) => void;
+type ReadReceiptCallback = (messageIds: string[]) => void;
+type ParticipantCallback = (channelId: string, count: number) => void;
 
 class NexconnChatService {
   private isInitialized = false;
@@ -42,10 +48,17 @@ class NexconnChatService {
   private currentAppKey: string | null = null;
   private messageListeners = new Set<MessageCallback>();
   private statusListeners = new Set<StatusCallback>();
+  private typingListeners = new Set<TypingCallback>();
+  private readReceiptListeners = new Set<ReadReceiptCallback>();
+  private participantListeners = new Set<ParticipantCallback>();
   private activeRoomId: string | null = null;
   private activeRoomChannel: OpenChannel | null = null;
   private connHandlerId = 'connectsphere-conn-handler';
   private msgHandlerId = 'connectsphere-msg-handler';
+  private channelHandlerId = 'connectsphere-channel-handler';
+  private openHandlerId = 'connectsphere-open-handler';
+  private reconnectTimer: any = null;
+  private reconnectAttempts = 0;
 
   // Session message store for instant UI rendering and status reconciliation
   private localMessages: Map<string, ChatMessage[]> = new Map();
@@ -98,6 +111,12 @@ class NexconnChatService {
       try {
         NCEngine.removeMessageHandler(this.msgHandlerId);
       } catch (_) {}
+      try {
+        NCEngine.removeChannelHandler(this.channelHandlerId);
+      } catch (_) {}
+      try {
+        NCEngine.removeOpenChannelHandler(this.openHandlerId);
+      } catch (_) {}
 
       // Initialize NCEngine targeting Singapore data center
       NCEngine.initialize({
@@ -115,6 +134,11 @@ class NexconnChatService {
               case ConnectionStatus.CONNECTED:
                 statusText = 'Connected';
                 this.isConnected = true;
+                this.reconnectAttempts = 0;
+                if (this.reconnectTimer) {
+                  clearTimeout(this.reconnectTimer);
+                  this.reconnectTimer = null;
+                }
                 break;
               case ConnectionStatus.CONNECTING:
                 statusText = 'Connecting...';
@@ -122,10 +146,12 @@ class NexconnChatService {
               case ConnectionStatus.DISCONNECTED:
                 statusText = 'Disconnected';
                 this.isConnected = false;
+                this.scheduleReconnect();
                 break;
               case ConnectionStatus.SUSPENDED:
                 statusText = 'Suspended';
                 this.isConnected = false;
+                this.scheduleReconnect();
                 break;
               default:
                 statusText = `Status: ${status}`;
@@ -170,10 +196,57 @@ class NexconnChatService {
                   content: contentObj?.text || contentObj?.content || String(rawMsg.content || ''),
                   sentTime: rawMsg.sentTime || Date.now(),
                   isSelf: rawMsg.senderUserId === this.currentUserId,
-                  status: 'sent',
+                  status: 'delivered',
+                  mediaUrl: contentObj?.imageUri || contentObj?.remoteUrl || contentObj?.fileUrl,
                 };
                 this.dispatchIncomingMessage(parsedMsg);
               });
+            }
+          },
+          onMessageReceiptResponse: ({ responses }: any) => {
+            if (Array.isArray(responses)) {
+              const readIds = responses.map((r: any) => r.messageId || r.messageUId).filter(Boolean);
+              if (readIds.length > 0) {
+                this.localMessages.forEach((msgs) => {
+                  msgs.forEach((m) => {
+                    if (readIds.includes(m.messageId)) {
+                      m.status = 'read';
+                    }
+                  });
+                });
+                this.readReceiptListeners.forEach((cb) => cb(readIds));
+              }
+            }
+          },
+        })
+      );
+
+      // Setup Channel Handler (Typing indicator events)
+      NCEngine.addChannelHandler(
+        this.channelHandlerId,
+        new ChannelHandler({
+          onTypingStatusChanged: (event) => {
+            const channelId = event.channelIdentifier?.channelId;
+            const typingUserIds = (event.userTypingStatus || [])
+              .map((u) => u.userId)
+              .filter((id) => id && id !== this.currentUserId);
+            if (channelId) {
+              this.typingListeners.forEach((cb) => cb(channelId, typingUserIds));
+            }
+          },
+        })
+      );
+
+      // Setup Open Channel Handler (Live participant sync)
+      NCEngine.addOpenChannelHandler(
+        this.openHandlerId,
+        new OpenChannelHandler({
+          onParticipantChanged: ({ channelId, participantCount }) => {
+            this.participantListeners.forEach((cb) => cb(channelId, participantCount));
+          },
+          onEntered: ({ channelId, response }) => {
+            if (response?.participantCount) {
+              this.participantListeners.forEach((cb) => cb(channelId, response.participantCount));
             }
           },
         })
@@ -266,9 +339,38 @@ class NexconnChatService {
   }
 
   /**
+   * Schedule exponential backoff reconnect attempt
+   */
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    if (!this.currentToken || !this.currentUserId) return;
+    if (this.reconnectAttempts >= 5) {
+      console.warn('[Nexconn SDK] Max reconnect attempts reached.');
+      return;
+    }
+
+    const delay = Math.min(1500 * Math.pow(2, this.reconnectAttempts), 20000);
+    this.reconnectAttempts++;
+    console.log(`[Nexconn SDK] Scheduling auto-reconnect attempt ${this.reconnectAttempts} in ${delay}ms...`);
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (!this.isConnected && this.currentToken && this.currentUserId) {
+        await this.connect(this.currentUserId, this.currentToken);
+      }
+    }, delay);
+  }
+
+  /**
    * Disconnect from Chat Server and clean up active listeners and room state.
    */
   async disconnect(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+
     try {
       if (this.activeRoomChannel) {
         await this.activeRoomChannel.exitChannel().catch(() => {});
@@ -279,6 +381,8 @@ class NexconnChatService {
         try {
           NCEngine.removeConnectionStatusHandler(this.connHandlerId);
           NCEngine.removeMessageHandler(this.msgHandlerId);
+          NCEngine.removeChannelHandler(this.channelHandlerId);
+          NCEngine.removeOpenChannelHandler(this.openHandlerId);
         } catch (_) {}
       }
       await NCEngine.disconnect();
@@ -306,6 +410,64 @@ class NexconnChatService {
   onStatusChange(callback: StatusCallback): () => void {
     this.statusListeners.add(callback);
     return () => this.statusListeners.delete(callback);
+  }
+
+  /**
+   * Subscribe to typing status changes
+   */
+  onTyping(callback: TypingCallback): () => void {
+    this.typingListeners.add(callback);
+    return () => this.typingListeners.delete(callback);
+  }
+
+  /**
+   * Subscribe to read receipt responses
+   */
+  onReadReceipt(callback: ReadReceiptCallback): () => void {
+    this.readReceiptListeners.add(callback);
+    return () => this.readReceiptListeners.delete(callback);
+  }
+
+  /**
+   * Subscribe to OpenChannel participant count changes
+   */
+  onParticipant(callback: ParticipantCallback): () => void {
+    this.participantListeners.add(callback);
+    return () => this.participantListeners.delete(callback);
+  }
+
+  /**
+   * Broadcast typing status to active channel
+   */
+  async sendTypingStatus(channelType: 'direct' | 'group', targetId: string): Promise<void> {
+    if (!this.isConnected) return;
+    try {
+      let channel: any;
+      if (channelType === 'direct') channel = new DirectChannel(targetId);
+      else if (channelType === 'group') channel = new GroupChannel(targetId);
+      if (channel && typeof channel.sendTypingStatus === 'function') {
+        await channel.sendTypingStatus('RC:TxtMsg');
+      }
+    } catch (err) {
+      // Non-critical, ignore typing errors
+    }
+  }
+
+  /**
+   * Mark messages as read and send read receipt response to sender
+   */
+  async markAsRead(channelType: 'direct' | 'group', targetId: string, messageIds: string[]): Promise<void> {
+    if (!this.isConnected || !messageIds || messageIds.length === 0) return;
+    try {
+      let channel: any;
+      if (channelType === 'direct') channel = new DirectChannel(targetId);
+      else if (channelType === 'group') channel = new GroupChannel(targetId);
+      if (channel && typeof channel.sendReadReceiptResponse === 'function') {
+        await channel.sendReadReceiptResponse(messageIds);
+      }
+    } catch (err) {
+      // Non-critical
+    }
   }
 
   private dispatchIncomingMessage(msg: ChatMessage) {
