@@ -1,4 +1,23 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+function extractJSON(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (e2) {}
+    }
+    throw e;
+  }
+}
 
 class GeminiService {
   constructor() {
@@ -64,9 +83,7 @@ ${conversationText}`;
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        // Extract JSON block if surrounded by markdown code blocks
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
+        return extractJSON(text);
       } catch (err) {
         console.warn('Gemini API summarize error, falling back to local synthesizer:', err.message);
       }
@@ -120,8 +137,7 @@ Format output as JSON:
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
+        return extractJSON(text);
       } catch (err) {
         console.warn('Gemini API answerQuestion error, falling back:', err.message);
       }
@@ -163,8 +179,7 @@ Format as JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
+        return extractJSON(text);
       } catch (err) {
         console.warn('Gemini API generateTopics error, falling back:', err.message);
       }
@@ -269,8 +284,7 @@ Output strictly JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
+        return extractJSON(text);
       } catch (err) {
         console.warn('Gemini API moderateMessage error, using local detector:', err.message);
       }
@@ -342,8 +356,7 @@ Format strictly JSON:
 }`;
         const result = await model.generateContent(prompt);
         const text = result.response.text();
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
+        return extractJSON(text);
       } catch (err) {
         console.warn('Gemini recommendCommunities error, falling back:', err.message);
       }
