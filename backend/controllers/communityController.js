@@ -217,6 +217,15 @@ export const joinCommunity = async (req, res) => {
       $addToSet: { joinedCommunities: community._id },
     });
 
+    // Synchronize membership with Nexconn server group channel
+    if (community.nexconnGroupId) {
+      try {
+        await nexconnService.inviteToGroupChannel(community.nexconnGroupId, [req.user._id]);
+      } catch (nexErr) {
+        console.warn('Nexconn group invite sync error:', nexErr.message);
+      }
+    }
+
     // Create notification for community owner
     if (String(community.owner) !== String(req.user._id)) {
       await Notification.create({

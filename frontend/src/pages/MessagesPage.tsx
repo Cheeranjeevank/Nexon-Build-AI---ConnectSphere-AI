@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Clock,
   WifiOff,
+  RotateCcw,
 } from 'lucide-react';
 import { ReportModal } from '../components/ReportModal';
 
@@ -174,6 +175,14 @@ export const MessagesPage: React.FC = () => {
       );
     } catch (err) {
       console.warn('File send error:', err);
+    }
+  };
+
+  const handleRetryMessage = async (msg: ChatMessage) => {
+    try {
+      await nexconnChat.retryMessage(msg);
+    } catch (err) {
+      console.warn('Retry message error:', err);
     }
   };
 
@@ -420,10 +429,20 @@ export const MessagesPage: React.FC = () => {
                         {isMe && (
                           <div className="flex items-center justify-end gap-1 mt-1 text-[10px]">
                             {msg.status === 'failed' ? (
-                              <span className="flex items-center gap-1 text-rose-400 font-medium">
-                                <AlertCircle className="w-3 h-3 text-rose-400" />
-                                <span>Failed to deliver</span>
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="flex items-center gap-1 text-rose-400 font-medium">
+                                  <AlertCircle className="w-3 h-3 text-rose-400" />
+                                  <span>Failed to deliver</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryMessage(msg)}
+                                  className="text-[10px] text-brand-blue hover:text-white hover:underline font-semibold flex items-center gap-0.5 ml-1 transition-colors"
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5" />
+                                  <span>Retry</span>
+                                </button>
+                              </div>
                             ) : msg.status === 'sending' ? (
                               <span className="flex items-center gap-1 text-amber-400">
                                 <Clock className="w-3 h-3 animate-spin" />

@@ -11,6 +11,7 @@ import {
   GroupChannelIdentifier,
   SendTextMessageParams,
   Helper,
+  AreaCode,
 } from '@nexconn/chat';
 
 export interface ChatMessage {
@@ -25,6 +26,7 @@ export interface ChatMessage {
   isSelf?: boolean;
   status?: 'sending' | 'sent' | 'failed';
   mediaUrl?: string;
+  tempId?: string;
 }
 
 type MessageCallback = (msg: ChatMessage) => void;
@@ -32,6 +34,8 @@ type StatusCallback = (status: ConnectionStatus, statusText: string) => void;
 
 class NexconnChatService {
   private isInitialized = false;
+  private isInitializing = false;
+  private isConnecting = false;
   private isConnected = false;
   private currentUserId: string | null = null;
   private currentToken: string | null = null;
@@ -40,8 +44,10 @@ class NexconnChatService {
   private statusListeners = new Set<StatusCallback>();
   private activeRoomId: string | null = null;
   private activeRoomChannel: OpenChannel | null = null;
+  private connHandlerId = 'connectsphere-conn-handler';
+  private msgHandlerId = 'connectsphere-msg-handler';
 
-  // Local fallback cache for smooth offline/sandbox demonstration
+  // Session message store for instant UI rendering and status reconciliation
   private localMessages: Map<string, ChatMessage[]> = new Map();
 
   constructor() {
@@ -51,7 +57,9 @@ class NexconnChatService {
   getSDKStatus() {
     return {
       isInitialized: this.isInitialized,
+      isInitializing: this.isInitializing,
       isConnected: this.isConnected,
+      isConnecting: this.isConnecting,
       currentUserId: this.currentUserId,
       hasAppKey: Boolean(this.currentAppKey && this.currentAppKey !== 'YOUR_NEXCONN_APP_KEY'),
       appKeyPreview: this.currentAppKey ? `${this.currentAppKey.slice(0, 4)}...` : 'Not set',
@@ -59,28 +67,47 @@ class NexconnChatService {
   }
 
   /**
-   * Initialize NCEngine once
+   * Initialize NCEngine.
+   * Safe for retries, prevents concurrent initialization, and sets isInitialized ONLY on success.
    */
   initialize(appKey?: string): boolean {
-    const key = appKey || this.currentAppKey || import.meta.env.VITE_NEXCONN_APP_KEY;
-    if (!key) {
-      console.warn('⚠️ Nexconn Chat: No App Key provided for initialization.');
+    const key = (appKey || this.currentAppKey || import.meta.env.VITE_NEXCONN_APP_KEY || '').trim();
+    if (!key || key === 'YOUR_NEXCONN_APP_KEY') {
+      console.warn('⚠️ Nexconn Chat: No valid App Key provided for initialization.');
+      this.isInitialized = false;
       return false;
     }
 
-    if (this.isInitialized) {
+    if (this.isInitialized && this.currentAppKey === key) {
       return true;
     }
 
+    if (this.isInitializing) {
+      console.warn('⚠️ Nexconn Chat: Initialization already in progress.');
+      return false;
+    }
+
+    this.isInitializing = true;
+
     try {
       this.currentAppKey = key;
-      NCEngine.initialize({ appKey: key });
-      this.isInitialized = true;
-      console.log('✅ Nexconn NCEngine initialized successfully with App Key.');
+      // Clean up previous handlers if re-initializing with a new key
+      try {
+        NCEngine.removeConnectionStatusHandler(this.connHandlerId);
+      } catch (_) {}
+      try {
+        NCEngine.removeMessageHandler(this.msgHandlerId);
+      } catch (_) {}
+
+      // Initialize NCEngine targeting Singapore data center
+      NCEngine.initialize({
+        appKey: key,
+        areaCode: AreaCode.SG,
+      });
 
       // Setup Connection Status Handler
       NCEngine.addConnectionStatusHandler(
-        'connectsphere-conn-handler',
+        this.connHandlerId,
         new ConnectionStatusHandler({
           onConnectionStatusChanged: ({ status, code }) => {
             let statusText = 'Disconnected';
@@ -104,7 +131,7 @@ class NexconnChatService {
                 statusText = `Status: ${status}`;
                 break;
             }
-            console.log(`[Nexconn SDK] Connection status: ${statusText} (code: ${code})`);
+            console.log(`[Nexconn SDK] Connection status changed: ${statusText} (code: ${code})`);
             this.statusListeners.forEach((cb) => cb(status, statusText));
           },
         })
@@ -112,10 +139,10 @@ class NexconnChatService {
 
       // Setup Message Handler
       NCEngine.addMessageHandler(
-        'connectsphere-msg-handler',
+        this.msgHandlerId,
         new MessageHandler({
           onMessageReceived: ({ messages }) => {
-            console.log('[Nexconn SDK] Messages received:', messages);
+            console.log('[Nexconn SDK] Real-time messages received from server:', messages);
             if (Array.isArray(messages)) {
               messages.forEach((rawMsg) => {
                 const targetId = rawMsg.channelIdentifier?.channelId || (rawMsg as any).targetId || '';
@@ -126,8 +153,12 @@ class NexconnChatService {
                 else channelType = 'group';
 
                 const contentObj = rawMsg.content as any;
-                const senderName = contentObj?.senderUserInfo?.name || contentObj?.user?.name || rawMsg.senderUserId || 'Unknown';
-                const senderAvatar = contentObj?.senderUserInfo?.avatarUrl || contentObj?.user?.portraitUri || contentObj?.user?.avatarUrl;
+                const senderName =
+                  contentObj?.senderUserInfo?.name || contentObj?.user?.name || rawMsg.senderUserId || 'Unknown';
+                const senderAvatar =
+                  contentObj?.senderUserInfo?.avatarUrl ||
+                  contentObj?.user?.portraitUri ||
+                  contentObj?.user?.avatarUrl;
 
                 const parsedMsg: ChatMessage = {
                   messageId: rawMsg.messageId || `msg_${Date.now()}_${Math.random()}`,
@@ -139,6 +170,7 @@ class NexconnChatService {
                   content: contentObj?.text || contentObj?.content || String(rawMsg.content || ''),
                   sentTime: rawMsg.sentTime || Date.now(),
                   isSelf: rawMsg.senderUserId === this.currentUserId,
+                  status: 'sent',
                 };
                 this.dispatchIncomingMessage(parsedMsg);
               });
@@ -147,86 +179,114 @@ class NexconnChatService {
         })
       );
 
+      this.isInitialized = true;
+      this.isInitializing = false;
+      console.log('✅ Nexconn NCEngine initialized successfully with App Key.');
       return true;
     } catch (err: any) {
-      console.warn('Nexconn initialize error (running in resilient mode):', err?.message || err);
-      this.isInitialized = true;
+      console.error('❌ Nexconn initialize failed:', err?.message || err);
+      // BUG FIX: Must remain false on failure so retry is possible
+      this.isInitialized = false;
+      this.isInitializing = false;
       return false;
     }
   }
 
   /**
-   * Connect to Nexconn Chat Server with user token
+   * Connect to Nexconn Chat Server with verified user token.
+   * Includes connection timeout, duplicate prevention, and zero fake success simulation.
    */
   async connect(userId: string, token: string, appKey?: string): Promise<{ success: boolean; error?: string }> {
+    if (!userId || !token) {
+      this.isConnected = false;
+      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'No Token Provided'));
+      return { success: false, error: 'Missing user ID or Nexconn authentication token' };
+    }
+
+    // Prevent duplicate connection if already connected as this user
+    if (this.isConnected && this.currentUserId === userId && this.currentToken === token) {
+      console.log(`[Nexconn SDK] User ${userId} is already connected.`);
+      return { success: true };
+    }
+
+    // Prevent simultaneous connection attempts
+    if (this.isConnecting) {
+      console.warn(`[Nexconn SDK] Connection already in progress for user ${this.currentUserId || userId}.`);
+      return { success: false, error: 'Connection attempt already in progress' };
+    }
+
     this.currentUserId = userId;
     this.currentToken = token;
 
-    if (!token) {
-      this.isConnected = false;
-      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'No Token Provided'));
-      return { success: false, error: 'No Nexconn authentication token provided' };
-    }
-
-    if (appKey && !this.isInitialized) {
-      this.initialize(appKey);
-    } else if (!this.isInitialized) {
-      this.initialize();
-    }
-
     if (!this.isInitialized) {
-      this.isConnected = false;
-      this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'SDK Not Initialized'));
-      return { success: false, error: 'Nexconn NCEngine failed to initialize' };
+      const initOk = this.initialize(appKey);
+      if (!initOk) {
+        this.isConnected = false;
+        this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'SDK Init Failed'));
+        return { success: false, error: 'Nexconn SDK failed to initialize. Check App Key.' };
+      }
     }
 
-    // Set connecting state
+    this.isConnecting = true;
     this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTING, 'Connecting...'));
 
-    // Attempt live Nexconn SDK connection
     try {
-      console.log(`[Nexconn SDK] Attempting connection for user: ${userId}...`);
-      const res = await NCEngine.connect({ token });
+      console.log(`[Nexconn SDK] Attempting server connection for user: ${userId}...`);
 
-      if (res && (res.code === 0 || (res as any).isOk)) {
+      // 10-second connection timeout guard
+      const connectPromise = NCEngine.connect({ token });
+      const timeoutPromise = new Promise<{ code: number; msg: string }>((_, reject) =>
+        setTimeout(() => reject(new Error('Connection attempt timed out after 10000ms')), 10000)
+      );
+
+      const res = (await Promise.race([connectPromise, timeoutPromise])) as any;
+      this.isConnecting = false;
+
+      if (res && (res.code === 0 || res.isOk)) {
         this.isConnected = true;
         const connectedId = res.data?.userId || userId;
-        console.log(`✅ [Nexconn SDK] Connected successfully. User ID: ${connectedId}`);
+        console.log(`✅ [Nexconn SDK] Authenticated & Connected successfully. User ID: ${connectedId}`);
         this.statusListeners.forEach((cb) => cb(ConnectionStatus.CONNECTED, 'Connected'));
         return { success: true };
       }
 
-      // Explicit failure: DO NOT mark connected or simulate success
       this.isConnected = false;
-      const errorMsg = res?.msg || `Connection failed with code: ${res?.code}`;
-      console.error(`❌ [Nexconn SDK] Connection failed: ${errorMsg}`);
+      const errorMsg = res?.msg || `Connection failed with status code ${res?.code}`;
+      console.error(`❌ [Nexconn SDK] Server rejected connection: ${errorMsg}`);
       this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, `Disconnected (${res?.code || 'Error'})`));
       return { success: false, error: errorMsg };
     } catch (error: any) {
-      // Explicit failure: DO NOT mark connected or simulate success
+      this.isConnecting = false;
       this.isConnected = false;
       const errorMsg = error?.message || 'Connection failed';
-      console.error('❌ [Nexconn SDK] Connection error:', errorMsg);
+      console.error('❌ [Nexconn SDK] Connection exception:', errorMsg);
       this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'Connection Failed'));
       return { success: false, error: errorMsg };
     }
   }
 
   /**
-   * Disconnect from Chat Server
+   * Disconnect from Chat Server and clean up active listeners and room state.
    */
   async disconnect(): Promise<void> {
     try {
       if (this.activeRoomChannel) {
-        await this.activeRoomChannel.exitChannel();
+        await this.activeRoomChannel.exitChannel().catch(() => {});
         this.activeRoomChannel = null;
         this.activeRoomId = null;
       }
+      if (this.isInitialized) {
+        try {
+          NCEngine.removeConnectionStatusHandler(this.connHandlerId);
+          NCEngine.removeMessageHandler(this.msgHandlerId);
+        } catch (_) {}
+      }
       await NCEngine.disconnect();
     } catch (err) {
-      console.warn('Disconnect error:', err);
+      console.warn('[Nexconn SDK] Disconnect cleanup warning:', err);
     }
     this.isConnected = false;
+    this.isConnecting = false;
     this.currentUserId = null;
     this.currentToken = null;
     this.statusListeners.forEach((cb) => cb(ConnectionStatus.DISCONNECTED, 'Disconnected'));
@@ -249,21 +309,37 @@ class NexconnChatService {
   }
 
   private dispatchIncomingMessage(msg: ChatMessage) {
-    // Save to channel local cache
     const key = `${msg.channelType}:${msg.targetId}`;
     const list = this.localMessages.get(key) || [];
-    list.push(msg);
-    this.localMessages.set(key, list);
 
+    // Avoid duplicates by messageId or tempId
+    const existingIndex = list.findIndex(
+      (m) => m.messageId === msg.messageId || (msg.tempId && m.messageId === msg.tempId)
+    );
+
+    if (existingIndex >= 0) {
+      list[existingIndex] = msg;
+    } else {
+      list.push(msg);
+    }
+
+    this.localMessages.set(key, list);
     this.messageListeners.forEach((cb) => cb(msg));
   }
 
   /**
-   * Send 1-to-1 Direct Message
+   * Send 1-to-1 Direct Message with server ID reconciliation.
    */
-  async sendDirectMessage(targetUserId: string, text: string, senderName = 'You', senderAvatar = ''): Promise<ChatMessage> {
+  async sendDirectMessage(
+    targetUserId: string,
+    text: string,
+    senderName = 'You',
+    senderAvatar = ''
+  ): Promise<ChatMessage> {
+    const tempId = `temp_dm_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const newMsg: ChatMessage = {
-      messageId: `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      messageId: tempId,
+      tempId,
       senderUserId: this.currentUserId || 'me',
       senderName,
       senderAvatar,
@@ -295,9 +371,12 @@ class NexconnChatService {
       const result = await channel.sendMessage(params);
 
       if (result && (result.code === 0 || (result as any).isOk)) {
+        // Reconcile server message ID and status
+        newMsg.messageId = result.data?.messageId || tempId;
+        newMsg.sentTime = result.data?.sentTime || Date.now();
         newMsg.status = 'sent';
       } else {
-        console.error('[Nexconn SDK] Direct message send returned error:', result);
+        console.error('[Nexconn SDK] Direct message send failed:', result);
         newMsg.status = 'failed';
       }
     } catch (err) {
@@ -310,11 +389,18 @@ class NexconnChatService {
   }
 
   /**
-   * Send Group Channel Message (Community Discussion)
+   * Send Group Channel Message (Community Discussion) with server ID reconciliation.
    */
-  async sendGroupMessage(groupId: string, text: string, senderName = 'You', senderAvatar = ''): Promise<ChatMessage> {
+  async sendGroupMessage(
+    groupId: string,
+    text: string,
+    senderName = 'You',
+    senderAvatar = ''
+  ): Promise<ChatMessage> {
+    const tempId = `temp_grp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const newMsg: ChatMessage = {
-      messageId: `msg_grp_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      messageId: tempId,
+      tempId,
       senderUserId: this.currentUserId || 'me',
       senderName,
       senderAvatar,
@@ -346,9 +432,12 @@ class NexconnChatService {
       const result = await channel.sendMessage(params);
 
       if (result && (result.code === 0 || (result as any).isOk)) {
+        // Reconcile server message ID and status
+        newMsg.messageId = result.data?.messageId || tempId;
+        newMsg.sentTime = result.data?.sentTime || Date.now();
         newMsg.status = 'sent';
       } else {
-        console.error('[Nexconn SDK] Group message send returned error:', result);
+        console.error('[Nexconn SDK] Group message send failed:', result);
         newMsg.status = 'failed';
       }
     } catch (err) {
@@ -368,17 +457,17 @@ class NexconnChatService {
       return true;
     }
 
-    // If already in another room, quit it first
+    // Exit previous room if switching
     if (this.activeRoomChannel) {
       try {
-        await this.activeRoomChannel.exitChannel();
+        await this.activeRoomChannel.exitChannel().catch(() => {});
       } catch (e) {
-        console.warn('Exit previous open channel error:', e);
+        console.warn('Exit previous open channel warning:', e);
       }
     }
 
     if (!this.isConnected) {
-      console.warn('[Nexconn SDK] Cannot join open channel: SDK not connected');
+      console.warn('[Nexconn SDK] Cannot enter open channel: SDK not connected');
       this.activeRoomId = null;
       this.activeRoomChannel = null;
       return false;
@@ -399,9 +488,13 @@ class NexconnChatService {
       }
 
       console.error('[Nexconn SDK] Enter open channel returned error:', result);
+      this.activeRoomId = null;
+      this.activeRoomChannel = null;
       return false;
     } catch (err) {
       console.error('[Nexconn SDK] Enter open channel exception:', err);
+      this.activeRoomId = null;
+      this.activeRoomChannel = null;
       return false;
     }
   }
@@ -412,9 +505,9 @@ class NexconnChatService {
   async leaveDiscussionRoom(): Promise<void> {
     if (this.activeRoomChannel) {
       try {
-        await this.activeRoomChannel.exitChannel();
+        await this.activeRoomChannel.exitChannel().catch(() => {});
       } catch (err) {
-        console.warn('Leave open channel error:', err);
+        console.warn('Leave open channel warning:', err);
       }
       this.activeRoomChannel = null;
       this.activeRoomId = null;
@@ -422,11 +515,19 @@ class NexconnChatService {
   }
 
   /**
-   * Send Message to Live Discussion Room (OpenChannel)
+   * Send Message to Live Discussion Room (OpenChannel).
+   * Enforces that the room MUST be successfully entered first.
    */
-  async sendRoomMessage(openChannelId: string, text: string, senderName = 'You', senderAvatar = ''): Promise<ChatMessage> {
+  async sendRoomMessage(
+    openChannelId: string,
+    text: string,
+    senderName = 'You',
+    senderAvatar = ''
+  ): Promise<ChatMessage> {
+    const tempId = `temp_room_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const newMsg: ChatMessage = {
-      messageId: `msg_room_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      messageId: tempId,
+      tempId,
       senderUserId: this.currentUserId || 'me',
       senderName,
       senderAvatar,
@@ -445,8 +546,18 @@ class NexconnChatService {
       return newMsg;
     }
 
+    // REQUIREMENT: Users cannot send messages to rooms they have not entered
+    if (this.activeRoomId !== openChannelId || !this.activeRoomChannel) {
+      console.error(
+        `[Nexconn SDK] Cannot send room message: user has not entered Open Channel ${openChannelId}.`
+      );
+      newMsg.status = 'failed';
+      this.dispatchIncomingMessage(newMsg);
+      return newMsg;
+    }
+
     try {
-      const channel = this.activeRoomChannel || new OpenChannel(openChannelId);
+      const channel = this.activeRoomChannel;
       const params = new SendTextMessageParams({
         text,
         senderUserInfo: {
@@ -458,9 +569,11 @@ class NexconnChatService {
       const result = await channel.sendMessage(params);
 
       if (result && (result.code === 0 || (result as any).isOk)) {
+        newMsg.messageId = result.data?.messageId || tempId;
+        newMsg.sentTime = result.data?.sentTime || Date.now();
         newMsg.status = 'sent';
       } else {
-        console.error('[Nexconn SDK] Room message send returned error:', result);
+        console.error('[Nexconn SDK] Room message send failed:', result);
         newMsg.status = 'failed';
       }
     } catch (err) {
@@ -473,6 +586,19 @@ class NexconnChatService {
   }
 
   /**
+   * Retry sending a previously failed message
+   */
+  async retryMessage(msg: ChatMessage): Promise<ChatMessage> {
+    if (msg.channelType === 'direct') {
+      return this.sendDirectMessage(msg.targetId, msg.content, msg.senderName, msg.senderAvatar);
+    } else if (msg.channelType === 'group') {
+      return this.sendGroupMessage(msg.targetId, msg.content, msg.senderName, msg.senderAvatar);
+    } else {
+      return this.sendRoomMessage(msg.targetId, msg.content, msg.senderName, msg.senderAvatar);
+    }
+  }
+
+  /**
    * Send File / Media message
    */
   async sendMediaMessage(
@@ -481,11 +607,12 @@ class NexconnChatService {
     file: File,
     onProgress?: (progress: number) => void
   ): Promise<ChatMessage | null> {
-    const msgId = `msg_media_${Date.now()}`;
+    const tempId = `temp_media_${Date.now()}`;
     const objectUrl = URL.createObjectURL(file);
 
     const newMsg: ChatMessage = {
-      messageId: msgId,
+      messageId: tempId,
+      tempId,
       senderUserId: this.currentUserId || 'me',
       targetId,
       channelType,
@@ -513,10 +640,19 @@ class NexconnChatService {
         let channel: any;
         if (channelType === 'direct') channel = new DirectChannel(targetId);
         else if (channelType === 'group') channel = new GroupChannel(targetId);
-        else channel = new OpenChannel(targetId);
+        else {
+          if (this.activeRoomId !== targetId || !this.activeRoomChannel) {
+            newMsg.status = 'failed';
+            this.dispatchIncomingMessage(newMsg);
+            return newMsg;
+          }
+          channel = this.activeRoomChannel;
+        }
 
         const result = await channel.sendMediaMessage(params);
         if (result && (result.code === 0 || (result as any).isOk)) {
+          newMsg.messageId = result.data?.messageId || tempId;
+          newMsg.sentTime = result.data?.sentTime || Date.now();
           newMsg.status = 'sent';
         } else {
           newMsg.status = 'failed';
@@ -534,7 +670,8 @@ class NexconnChatService {
   }
 
   /**
-   * Load history messages for a channel
+   * Load history messages for a channel directly from Nexconn SDK.
+   * Never fabricates fake demo messages.
    */
   async loadHistory(channelType: 'direct' | 'group' | 'open', targetId: string): Promise<ChatMessage[]> {
     const key = `${channelType}:${targetId}`;
@@ -576,28 +713,48 @@ class NexconnChatService {
           const remoteMsgs: ChatMessage[] = rawList.map((d: any) => ({
             messageId: d.messageId || String(Math.random()),
             senderUserId: d.senderUserId || 'unknown',
-            senderName: d.content?.senderUserInfo?.name || d.content?.user?.name || d.senderUserId,
-            senderAvatar: d.content?.senderUserInfo?.avatarUrl || d.content?.user?.portraitUri || d.content?.user?.avatarUrl,
+            senderName:
+              d.content?.senderUserInfo?.name || d.content?.user?.name || d.senderUserId,
+            senderAvatar:
+              d.content?.senderUserInfo?.avatarUrl ||
+              d.content?.user?.portraitUri ||
+              d.content?.user?.avatarUrl,
             targetId: d.targetId || targetId,
             channelType,
-            content: d.content?.text || d.content?.content || (typeof d.content === 'string' ? d.content : ''),
+            content:
+              d.content?.text ||
+              d.content?.content ||
+              (typeof d.content === 'string' ? d.content : ''),
             sentTime: d.sentTime || Date.now(),
             isSelf: d.senderUserId === this.currentUserId,
             status: 'sent',
             mediaUrl: d.content?.imageUri || d.content?.remoteUrl || d.content?.fileUrl,
           }));
 
-          this.localMessages.set(key, remoteMsgs);
-          return remoteMsgs;
+          // Merge without losing locally sent messages
+          const mergedMap = new Map<string, ChatMessage>();
+          remoteMsgs.forEach((m) => mergedMap.set(m.messageId, m));
+          cached.forEach((m) => {
+            if (!mergedMap.has(m.messageId)) {
+              mergedMap.set(m.messageId, m);
+            }
+          });
+
+          const merged = Array.from(mergedMap.values()).sort((a, b) => a.sentTime - b.sentTime);
+          this.localMessages.set(key, merged);
+          return merged;
         }
       } catch (err) {
         console.warn('[Nexconn SDK] History query error:', err);
       }
     }
 
-    // Return genuine cached messages from this session, or empty array if none
     return cached;
   }
 }
 
 export const nexconnChat = new NexconnChatService();
+
+if (typeof window !== 'undefined') {
+  (window as any).nexconnChat = nexconnChat;
+}

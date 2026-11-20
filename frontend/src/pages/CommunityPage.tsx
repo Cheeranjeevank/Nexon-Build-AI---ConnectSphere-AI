@@ -19,6 +19,8 @@ import {
   FileText,
   Info,
   CheckCircle,
+  RotateCcw,
+  AlertCircle,
 } from 'lucide-react';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { ReportModal } from '../components/ReportModal';
@@ -162,6 +164,14 @@ export const CommunityPage: React.FC = () => {
       console.warn('Send room error:', err);
     } finally {
       setIsRoomSending(false);
+    }
+  };
+
+  const handleRetryMessage = async (msg: ChatMessage) => {
+    try {
+      await nexconnChat.retryMessage(msg);
+    } catch (err) {
+      console.warn('Retry message error:', err);
     }
   };
 
@@ -474,8 +484,19 @@ export const CommunityPage: React.FC = () => {
                           {msg.content}
                         </div>
                         {isMe && msg.status === 'failed' && (
-                          <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1">
-                            <span>Failed to deliver</span>
+                          <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1.5">
+                            <span className="flex items-center gap-1 font-medium">
+                              <AlertCircle className="w-3 h-3 text-rose-400" />
+                              <span>Failed to deliver</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRetryMessage(msg)}
+                              className="text-[10px] text-brand-blue hover:text-white hover:underline font-semibold flex items-center gap-0.5 ml-1 transition-colors"
+                            >
+                              <RotateCcw className="w-2.5 h-2.5" />
+                              <span>Retry</span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -639,8 +660,19 @@ export const CommunityPage: React.FC = () => {
                             {msg.content}
                           </div>
                           {isMe && msg.status === 'failed' && (
-                            <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1">
-                              <span>Failed to deliver</span>
+                            <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-end gap-1.5">
+                              <span className="flex items-center gap-1 font-medium">
+                                <AlertCircle className="w-3 h-3 text-rose-400" />
+                                <span>Failed to deliver</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRetryMessage(msg)}
+                                className="text-[10px] text-amber-300 hover:text-white hover:underline font-semibold flex items-center gap-0.5 ml-1 transition-colors"
+                              >
+                                <RotateCcw className="w-2.5 h-2.5" />
+                                <span>Retry</span>
+                              </button>
                             </div>
                           )}
                         </div>
