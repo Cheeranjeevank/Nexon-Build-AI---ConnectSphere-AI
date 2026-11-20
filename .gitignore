@@ -16,6 +16,8 @@ build/
 
 backend/dom-agent-screenshots/
 *.png
+*.mp4
+*.mov
 
 npm-debug.log*
 yarn-debug.log*

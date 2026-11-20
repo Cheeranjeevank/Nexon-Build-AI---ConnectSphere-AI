@@ -30,31 +30,31 @@ class GeminiService {
   }
 
   get modelName() {
-    const raw = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-    // Sanitize obsolete or custom aliases
-    if (raw.includes('latest') || raw.includes('3.5')) {
-      return 'gemini-1.5-flash';
+    const raw = process.env.GEMINI_MODEL;
+    // gemini-flash-lite-latest is verified working with this key
+    if (!raw || raw.includes('1.5') || raw.includes('3.5') || raw.includes('flash-latest')) {
+      return 'gemini-flash-lite-latest';
     }
     return raw;
   }
 
   isConfigured() {
-    // Official Google Gemini API keys start with 'AIzaSy' and are 39 characters
     return Boolean(
       this.apiKey &&
-      this.apiKey.startsWith('AIzaSy') &&
-      this.apiKey.length >= 30
+      this.apiKey !== 'YOUR_GEMINI_API_KEY' &&
+      this.apiKey.length >= 20
     );
   }
 
-  getModel() {
+  getModel(overrideModel) {
     if (!this.isConfigured()) return null;
     // Re-initialize client whenever key changes (supports hot env reload)
     if (!this._client || this._client._apiKey !== this.apiKey) {
       this._client = new GoogleGenerativeAI(this.apiKey);
       this._client._apiKey = this.apiKey; // track for change detection
     }
-    return this._client.getGenerativeModel({ model: this.modelName });
+    const targetModel = overrideModel || this.modelName;
+    return this._client.getGenerativeModel({ model: targetModel });
   }
 
   /**
